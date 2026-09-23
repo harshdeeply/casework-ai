@@ -22,6 +22,16 @@ This is a portable contract for a future webhook platform and support desk. It d
 
 `outcome` is `acknowledged` with a 2xx code and no retry, `http_error` with 4xx/5xx, or `timeout` with null status. A retry time is an observation from the source scheduler, not a promise of success. Event ID alone is insufficient for account isolation: correlation also requires customer and endpoint IDs. A repeated `attempt_id` with a changed payload returns conflict.
 
+## Source completeness contract
+
+`POST /api/source-coverage` uses the ingestion key. It records a **source-declared** export window for one customer and endpoint:
+
+```json
+{"customer_id":"acme-demo","endpoint_id":"endpoint-billing","source":"Synthetic delivery export","complete_from":"2026-09-22T16:55:00Z","complete_through":"2026-09-22T17:04:00Z"}
+```
+
+Times require timezones; the window cannot be reversed or extend into the future. The source's assertion is not independent proof of completeness. A production adapter must define what complete means and account for delayed ingestion, backfill, and retention. `python3 -m casework.importer examples/attempts.jsonl --coverage examples/coverage.json --dry-run` validates an export and JSON array of windows; without `--dry-run` it stores both atomically. Changing a window invalidates pending review even when the attempt list is identical.
+
 ## Support case
 
 `POST /api/cases`, authorized with the operator key and `X-Demo-Customer` header:
@@ -37,7 +47,7 @@ This is a portable contract for a future webhook platform and support desk. It d
 }
 ```
 
-The local operator key is global to the demo; a real identity proxy must establish customer scope independently of the request header. `GET /api/cases/{id}` returns the finding, pinned runbook version, attempt evidence, draft, staleness flag, and audit trail. `POST /api/cases/{id}/refresh` takes `{}`. `POST /api/cases/{id}/decision` takes `{"reviewer":"support-1","decision":"approve","final_message":"...","acknowledge_uncertainty":true}`. No case sends a message on its own.
+The local operator key is global to the demo; a real identity proxy must establish customer scope independently of the request header. `GET /api/cases/{id}` returns the finding, pinned runbook version, attempt evidence, `source_coverage`, `coverage_state`, draft, staleness flag, and audit trail. `POST /api/cases/{id}/refresh` takes `{}`. `POST /api/cases/{id}/decision` takes `{"reviewer":"support-1","decision":"approve","final_message":"...","acknowledge_uncertainty":true}`. No case sends a message on its own.
 
 ## Handoff to a support desk
 
