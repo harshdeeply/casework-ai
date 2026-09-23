@@ -1,0 +1,11 @@
+{
+  "version": "2026-09-example-v2",
+  "runbooks": [
+    {"id":"RB-01","title":"No matching delivery record","findings":["NO_RECORD"],"text":"Check the event and endpoint identifiers and the log retention window. Do not conclude that an event was never generated solely because it is absent from the current delivery log. Escalate if records remain missing."},
+    {"id":"RB-02","title":"Endpoint acknowledged a delivery","findings":["ACKNOWLEDGED"],"text":"A 2xx HTTP response confirms the destination endpoint acknowledged the request. It does not prove the customer's application completed downstream processing. Investigate application logs using the event ID."},
+    {"id":"RB-03","title":"Multiple acknowledged attempts","findings":["MULTIPLE_ACKS"],"text":"Multiple 2xx responses for the same event are evidence of repeated delivery attempts, not evidence of duplicate business actions. Escalate delivery history and ask the customer to use event ID idempotency when processing."},
+    {"id":"RB-04","title":"Retry scheduled","findings":["RETRY_SCHEDULED"],"text":"A non-acknowledged attempt with a recorded future retry is pending. Confirm the endpoint is reachable and monitor the next delivery result. Do not promise that the retry will succeed."},
+    {"id":"RB-05","title":"Failure without recorded retry","findings":["FAILED_UNRESOLVED"],"text":"A failed or timed-out attempt with no recorded next retry requires investigation. Do not claim the platform has exhausted retries without checking the configured retry policy and full history."},
+    {"id":"RB-06","title":"Scheduled retry has no later log","findings":["RETRY_UNOBSERVED"],"text":"When a scheduled retry time has passed but no subsequent attempt appears in the available log, investigate the gap. Log retention, ingestion delay, or a delivery fault are possibilities; the log alone does not establish which."}
+  ]
+}

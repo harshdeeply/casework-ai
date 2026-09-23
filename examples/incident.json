@@ -1,0 +1,15 @@
+{
+  "ticket": {
+    "ticket_id": "T-1042",
+    "customer_id": "acme-demo",
+    "event_id": "evt-invoice-1042",
+    "endpoint_id": "endpoint-billing",
+    "subject": "Invoice event did not arrive",
+    "description": "Our finance workflow has not updated. Can you confirm whether the webhook was delivered?"
+  },
+  "attempts": [
+    {"attempt_id":"attempt-101","customer_id":"acme-demo","event_id":"evt-invoice-1042","endpoint_id":"endpoint-billing","sequence":1,"sent_at":"2026-09-22T17:00:00Z","outcome":"timeout","http_status":null,"next_retry_at":"2026-09-22T17:02:00Z"},
+    {"attempt_id":"attempt-102","customer_id":"acme-demo","event_id":"evt-invoice-1042","endpoint_id":"endpoint-billing","sequence":2,"sent_at":"2026-09-22T17:02:00Z","outcome":"http_error","http_status":503,"next_retry_at":"2026-09-22T17:06:00Z"}
+  ],
+  "next_attempt": {"attempt_id":"attempt-103","customer_id":"acme-demo","event_id":"evt-invoice-1042","endpoint_id":"endpoint-billing","sequence":3,"sent_at":"2026-09-22T17:06:00Z","outcome":"acknowledged","http_status":200,"next_retry_at":null}
+}

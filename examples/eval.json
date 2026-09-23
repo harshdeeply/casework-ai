@@ -1,7 +1,19 @@
 [
-  {"question":"How do we record rent payment amounts and dates?","expected":"P-102"},
-  {"question":"Do we need consent for tenant screening?","expected":"P-103"},
-  {"question":"What do I log for a maintenance issue?","expected":"P-101"},
-  {"question":"How do I store signed lease documents?","expected":"P-104"},
-  {"question":"What is the weather on Mars?","expected":null}
+  {"name":"no log record","trace":[],"expected":"NO_RECORD"},
+  {"name":"single 200","trace":[["acknowledged",200,false]],"expected":"ACKNOWLEDGED"},
+  {"name":"single 204","trace":[["acknowledged",204,false]],"expected":"ACKNOWLEDGED"},
+  {"name":"timeout with retry","trace":[["timeout",null,true]],"expected":"RETRY_SCHEDULED"},
+  {"name":"503 with retry","trace":[["http_error",503,true]],"expected":"RETRY_SCHEDULED"},
+  {"name":"429 with retry","trace":[["http_error",429,true]],"expected":"RETRY_SCHEDULED"},
+  {"name":"403 without retry","trace":[["http_error",403,false]],"expected":"FAILED_UNRESOLVED"},
+  {"name":"timeout without retry","trace":[["timeout",null,false]],"expected":"FAILED_UNRESOLVED"},
+  {"name":"503 then 200","trace":[["http_error",503,true],["acknowledged",200,false]],"expected":"ACKNOWLEDGED"},
+  {"name":"timeout then 200","trace":[["timeout",null,true],["acknowledged",200,false]],"expected":"ACKNOWLEDGED"},
+  {"name":"503 then timeout with retry","trace":[["http_error",503,true],["timeout",null,true]],"expected":"RETRY_SCHEDULED"},
+  {"name":"503 then timeout no retry","trace":[["http_error",503,true],["timeout",null,false]],"expected":"FAILED_UNRESOLVED"},
+  {"name":"two acknowledged attempts","trace":[["acknowledged",200,false],["acknowledged",200,false]],"expected":"MULTIPLE_ACKS"},
+  {"name":"204 then timeout","trace":[["acknowledged",204,false],["timeout",null,true]],"expected":"ACKNOWLEDGED"},
+  {"name":"three retries then ack","trace":[["http_error",500,true],["http_error",502,true],["timeout",null,true],["acknowledged",200,false]],"expected":"ACKNOWLEDGED"},
+  {"name":"duplicate acknowledgments after failure","trace":[["http_error",500,true],["acknowledged",200,false],["acknowledged",202,false]],"expected":"MULTIPLE_ACKS"},
+  {"name":"retry time passed without a new log","trace":[["http_error",503,true]],"overdue":true,"expected":"RETRY_UNOBSERVED"}
 ]
