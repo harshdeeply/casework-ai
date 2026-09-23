@@ -8,6 +8,17 @@ A support engineer cannot safely answer that from a ticket alone. They need the 
 
 This is an original, runnable **reference deployment using synthetic incidents**. It is not connected to a real customer, ticketing account, or production webhook service. No customer impact or model accuracy is claimed.
 
+## Interactive browser demo
+
+The hosted workbench is a React + TypeScript app in [`web/`](web/) with source-owned shadcn/ui-style components. It lets a visitor inspect three synthetic escalations, add delivery attempts, invalidate stale evidence, refresh findings, edit and review a draft, and hand an approved response to an isolated demo desk. Changes are saved in the visitor's browser storage and can be reset. The hosted UI has **no shared backend, customer telemetry, external desk, or live AI model**. The Python service below is the separate runnable reference backend.
+
+```bash
+cd web
+npm ci
+npm test
+npm run dev
+```
+
 ## Three-minute walkthrough
 
 ```bash
