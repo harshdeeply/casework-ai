@@ -1,1 +1,1 @@
-"""Evidence-bound operations assistant with explicit human approval."""
+"""Evidence-bound webhook escalation workbench with human review."""
