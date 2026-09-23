@@ -1,0 +1,3 @@
+attempt_id,customer_id,event_id,endpoint_id,sequence,sent_at,outcome,http_status,next_retry_at
+attempt-101,acme-demo,evt-invoice-1042,endpoint-billing,1,2026-09-22T17:00:00Z,timeout,,2026-09-22T17:02:00Z
+attempt-102,acme-demo,evt-invoice-1042,endpoint-billing,2,2026-09-22T17:02:00Z,http_error,503,2026-09-22T17:06:00Z
