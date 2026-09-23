@@ -3,3 +3,7 @@ __pycache__/
 *.sqlite3
 *.sqlite3-*
 .DS_Store
+web/node_modules/
+web/dist/
+web/.vite/
+web/.netlify/
