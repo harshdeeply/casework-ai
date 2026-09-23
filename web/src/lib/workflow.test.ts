@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addAttempt, decideCase, findingFor, handoff, isCurrent, nextAttempt, openCase, refreshCase, scopedAttempts, seedState, type Attempt } from './workflow'
+import { addAttempt, coverageState, decideCase, findingFor, handoff, isCurrent, nextAttempt, openCase, refreshCase, scopedAttempts, seedState, setCoverage, type Attempt } from './workflow'
 
 describe('public sandbox workflow', () => {
   it('starts with an overdue retry that has no observed result', () => {
@@ -7,6 +7,24 @@ describe('public sandbox workflow', () => {
     expect(c.finding).toBe('RETRY_UNOBSERVED')
     expect(c.evidenceIds).toContain('runbook:RB-06')
     expect(c.evidenceSnapshot).toHaveLength(2)
+    expect(coverageState(c.finding,c.evidenceSnapshot,c.coverageSnapshot)).toBe('BEHIND_RETRY')
+    expect(c.draft).toMatch(/cannot yet confirm/)
+  })
+  it('invalidates the saved answer when only the source completeness window changes', () => {
+    const state = seedState(), c = state.cases.find(x => x.ticket_id === 'T-1042')!
+    const extended = setCoverage(state, { ...c.coverageSnapshot!, complete_through: '2026-09-22T17:10:00Z' })
+    expect(extended.attempts).toHaveLength(state.attempts.length)
+    expect(isCurrent(extended,c)).toBe(false)
+    expect(() => decideCase(extended,c.id,'approve','Reviewer',c.draft,true)).toThrow(/Refresh/)
+    const updated = refreshCase(extended,c.id), fresh = updated.cases.find(x => x.id === c.id)!
+    expect(coverageState(fresh.finding,fresh.evidenceSnapshot,fresh.coverageSnapshot)).toBe('THROUGH_RETRY')
+    expect(fresh.draft).toMatch(/no later attempt appears/)
+    expect(isCurrent(updated,fresh)).toBe(true)
+  })
+  it('keeps another customer’s coverage out of the case', () => {
+    const state = seedState(), c = state.cases.find(x => x.ticket_id === 'T-1042')!
+    const other = setCoverage(state, { ...c.coverageSnapshot!, customer_id:'other', complete_through:'2026-09-22T17:10:00Z' })
+    expect(isCurrent(other,c)).toBe(true)
   })
   it('blocks stale review, then refreshes the snapshot and citation', () => {
     const state = addAttempt(seedState(), nextAttempt), c = state.cases.find(x => x.ticket_id === 'T-1042')!
