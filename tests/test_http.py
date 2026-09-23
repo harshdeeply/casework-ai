@@ -71,6 +71,13 @@ class APIFlowTests(unittest.TestCase):
         self.assertEqual(self.request("/api/no-such-endpoint", key="local-operator")[0], 404)
         self.assertEqual(self.request("/api/cases/not-found", key="local-operator")[0], 404)
 
+    def test_source_coverage_requires_ingest_key(self):
+        coverage = {"customer_id": "acme-demo", "endpoint_id": "endpoint-billing", "source": "export",
+                    "complete_from": "2026-09-22T16:55:00Z", "complete_through": "2026-09-22T17:10:00Z"}
+        self.assertEqual(self.request("/api/source-coverage", coverage, "local-operator")[0], 401)
+        self.assertEqual(self.request("/api/source-coverage", coverage, "local-ingest")[1], {"updated": True})
+        self.assertEqual(self.request("/api/source-coverage", coverage, "local-ingest")[1], {"updated": False})
+
     def test_oversized_body_is_rejected(self):
         status, response = self.request("/api/cases", {"padding":"x" * 17000}, "local-operator")
         self.assertEqual(status, 400)

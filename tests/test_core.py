@@ -118,6 +118,55 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(case["evidence_current"])
         self.store.decide(self.id, "c1", "reviewer", "approve")
 
+    def test_source_lag_changes_answer_and_coverage_update_invalidates_review(self):
+        store = CaseStore(clock=lambda: datetime(2026, 9, 22, 18, 0, tzinfo=timezone.utc))
+        store.add_attempt(attempt())
+        lagging = {"customer_id": "c1", "endpoint_id": "ep1", "source": "delivery-export",
+                   "complete_from": "2026-09-22T16:55:00Z", "complete_through": "2026-09-22T17:01:00Z"}
+        self.assertTrue(store.set_coverage(lagging))
+        case_id = store.open_case(ticket(), POLICY)["case_id"]
+        case = store.get(case_id, "c1")
+        self.assertEqual(case["finding"], "RETRY_UNOBSERVED")
+        self.assertEqual(case["coverage_state"], "BEHIND_RETRY")
+        self.assertIn("cannot yet confirm", case["draft"]["customer_message"])
+        # Same attempts, but the source now claims its export covers the retry time.
+        self.assertTrue(store.set_coverage({**lagging, "complete_through": "2026-09-22T17:05:00Z"}))
+        self.assertFalse(store.get(case_id, "c1")["evidence_current"])
+        with self.assertRaisesRegex(Conflict, "refresh"):
+            store.decide(case_id, "c1", "reviewer", "approve", acknowledge_uncertainty=True)
+        refreshed = store.refresh(case_id, "c1", POLICY)
+        self.assertEqual(refreshed["coverage_state"], "THROUGH_RETRY")
+        self.assertIn("no later attempt appears", refreshed["draft"]["customer_message"])
+        # An actual attempt arriving later makes that conclusion stale again.
+        store.add_attempt(attempt(name="a2", sequence=2, outcome="acknowledged", status=200, retry=None))
+        self.assertFalse(store.get(case_id, "c1")["evidence_current"])
+        self.assertEqual(store.refresh(case_id, "c1", POLICY)["finding"], "ACKNOWLEDGED")
+
+    def test_lagging_retry_uses_cautious_template_even_with_model_enabled(self):
+        store = CaseStore(clock=lambda: datetime(2026, 9, 22, 18, 0, tzinfo=timezone.utc))
+        store.add_attempt(attempt())
+        store.set_coverage({"customer_id": "c1", "endpoint_id": "ep1", "source": "export",
+                            "complete_from": "2026-09-22T16:55:00Z", "complete_through": "2026-09-22T17:01:00Z"})
+        def unsafe_model(*args):
+            raise AssertionError("incomplete evidence must not enter freeform drafting")
+        case_id = store.open_case(ticket(), POLICY, unsafe_model)["case_id"]
+        self.assertIn("cannot yet confirm", store.get(case_id, "c1")["draft"]["customer_message"])
+
+    def test_source_coverage_is_scoped_and_validated(self):
+        store = CaseStore(clock=lambda: datetime(2026, 9, 22, 18, 0, tzinfo=timezone.utc))
+        store.add_attempt(attempt())
+        coverage = {"customer_id": "c2", "endpoint_id": "ep1", "source": "export",
+                    "complete_from": "2026-09-22T16:55:00Z", "complete_through": "2026-09-22T17:05:00Z"}
+        store.set_coverage(coverage)
+        case = store.get(store.open_case(ticket(), POLICY)["case_id"], "c1")
+        self.assertEqual(case["coverage_state"], "NOT_REPORTED")
+        self.assertIsNone(case["source_coverage"])
+        for bad in ({**coverage, "complete_through": "2026-09-22T16:50:00Z"},
+                    {**coverage, "complete_through": "2099-01-01T00:00:00Z"},
+                    {**coverage, "complete_through": "2026-09-22T17:05:00"}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                store.set_coverage(bad)
+
     def test_uncertain_findings_require_acknowledgment(self):
         for status in ("NO_RECORD", "FAILED_UNRESOLVED", "MULTIPLE_ACKS", "RETRY_UNOBSERVED"):
             with self.subTest(status=status):

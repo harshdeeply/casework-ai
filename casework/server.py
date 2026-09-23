@@ -63,6 +63,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "POST" and path == "/api/attempts":
             self.require("ingest")
             return self.respond(201, {"inserted": STORE.add_attempt(self.body())})
+        if self.command == "POST" and path == "/api/source-coverage":
+            self.require("ingest")
+            return self.respond(200, {"updated": STORE.set_coverage(self.body())})
         self.require("operator")
         customer = self.customer()
         if self.command == "GET" and path == "/api/cases":

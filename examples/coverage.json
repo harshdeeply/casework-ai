@@ -1,0 +1,9 @@
+[
+  {
+    "customer_id": "acme-demo",
+    "endpoint_id": "endpoint-billing",
+    "source": "Synthetic delivery export",
+    "complete_from": "2026-09-22T16:55:00Z",
+    "complete_through": "2026-09-22T17:04:00Z"
+  }
+]

@@ -36,6 +36,20 @@ class DurableTests(unittest.TestCase):
             store.import_attempts([first, conflicting])
         self.assertEqual(store.db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0], 0)
 
+    def test_export_and_coverage_manifest_commit_atomically(self):
+        root = Path(__file__).resolve().parents[1] / "examples"
+        records = read_export(root / "attempts.jsonl")
+        coverage = json.loads((root / "coverage.json").read_text())
+        store = CaseStore()
+        self.assertEqual(store.import_attempts(records, coverage),
+                         {"inserted": 2, "duplicates": 0, "coverage_updated": 1})
+        case = store.get(store.open_case(json.loads((root / "incident.json").read_text())["ticket"], POLICY)["case_id"], "acme-demo")
+        self.assertEqual(case["coverage_state"], "BEHIND_RETRY")
+        changed = [{**records[0], "outcome": "acknowledged", "http_status": 200, "next_retry_at": None}]
+        with self.assertRaises(Conflict):
+            store.import_attempts(changed, [{**coverage[0], "complete_through":"2026-09-22T17:10:00Z"}])
+        self.assertTrue(store.get(case["id"], "acme-demo")["evidence_current"])
+
     def test_batch_validation_fails_before_any_write(self):
         store = CaseStore()
         with self.assertRaises(ValueError):

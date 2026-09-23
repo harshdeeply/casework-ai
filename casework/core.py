@@ -79,6 +79,36 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def validate_coverage(value):
+    """A source's claim about its complete export window, not a claim about downstream processing."""
+    if not isinstance(value, dict) or set(value) != {"customer_id", "endpoint_id", "source", "complete_from", "complete_through"}:
+        raise ValueError("coverage requires customer_id, endpoint_id, source, complete_from, complete_through")
+    result = {}
+    for key in ("customer_id", "endpoint_id", "source"):
+        item = value[key]
+        if not isinstance(item, str) or not 1 <= len(item.strip()) <= 128:
+            raise ValueError(f"invalid {key}")
+        result[key] = item.strip()
+    result["complete_from"] = parse_time(value["complete_from"])
+    result["complete_through"] = parse_time(value["complete_through"])
+    if result["complete_from"] > result["complete_through"]:
+        raise ValueError("coverage window is reversed")
+    if result["complete_through"] > utcnow():
+        raise ValueError("coverage cannot extend into the future")
+    return result
+
+
+def coverage_state(finding, attempts, coverage):
+    if finding != "RETRY_UNOBSERVED":
+        return "NOT_APPLICABLE"
+    if not coverage:
+        return "NOT_REPORTED"
+    latest = max(attempts, key=lambda a: (a["sequence"], a["sent_at"], a["attempt_id"]))
+    if coverage["complete_from"] > latest["sent_at"]:
+        return "WINDOW_GAP"
+    return "THROUGH_RETRY" if coverage["complete_through"] >= latest["next_retry_at"] else "BEHIND_RETRY"
+
+
 def finding_for(attempts, as_of=None):
     """Observations only. An HTTP 2xx says nothing about downstream processing."""
     if not attempts:
@@ -104,7 +134,7 @@ def evidence_for(policy, finding, attempts):
                                     "data": {"title": runbooks[0]["title"], "text": runbooks[0]["text"]}}]
 
 
-def baseline_draft(ticket, finding, evidence):
+def baseline_draft(ticket, finding, evidence, coverage=None):
     attempts = [e["data"] for e in evidence if e["type"] == "delivery_attempt"]
     citations = [e["id"] for e in evidence]
     if finding == "NO_RECORD":
@@ -119,7 +149,13 @@ def baseline_draft(ticket, finding, evidence):
         message = f"The most recent attempt for event {ticket['event_id']} was not acknowledged. Our logs show a retry scheduled for {latest['next_retry_at']}. We will check the next result."
     elif finding == "RETRY_UNOBSERVED":
         latest = max(attempts, key=lambda a: (a["sequence"], a["sent_at"], a["attempt_id"]))
-        message = f"A retry for event {ticket['event_id']} was scheduled for {latest['next_retry_at']}, but no later attempt appears in the available logs. We are investigating the gap rather than assuming delivery succeeded or failed."
+        state = coverage_state(finding, attempts, coverage)
+        if state == "BEHIND_RETRY":
+            message = f"A retry for event {ticket['event_id']} was scheduled for {latest['next_retry_at']}, but the delivery export currently covers only through {coverage['complete_through']}. We cannot yet confirm whether that retry occurred."
+        elif state == "WINDOW_GAP":
+            message = f"A retry for event {ticket['event_id']} was scheduled for {latest['next_retry_at']}, but the available export does not cover the earlier attempt. We are checking the missing window before confirming the outcome."
+        else:
+            message = f"A retry for event {ticket['event_id']} was scheduled for {latest['next_retry_at']}, but no later attempt appears in the available logs. We are investigating the gap rather than assuming delivery succeeded or failed."
     else:
         message = f"The available logs show an unacknowledged delivery attempt for event {ticket['event_id']} and no recorded next retry. We are investigating before confirming a resolution."
     return {"customer_message": message, "internal_summary": f"{finding}: {ticket['subject']}",
@@ -161,6 +197,10 @@ class CaseStore:
               outcome TEXT NOT NULL,http_status INTEGER,next_retry_at TEXT,
               payload_hash TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS attempt_lookup ON attempts(customer_id,event_id,endpoint_id,sequence);
+            CREATE TABLE IF NOT EXISTS source_coverage (
+              customer_id TEXT NOT NULL,endpoint_id TEXT NOT NULL,source TEXT NOT NULL,
+              complete_from TEXT NOT NULL,complete_through TEXT NOT NULL,
+              PRIMARY KEY(customer_id,endpoint_id));
             CREATE TABLE IF NOT EXISTS cases (
               id TEXT PRIMARY KEY,ticket_id TEXT NOT NULL,customer_id TEXT NOT NULL,
               event_id TEXT NOT NULL,endpoint_id TEXT NOT NULL,subject TEXT NOT NULL,
@@ -175,6 +215,32 @@ class CaseStore:
               case_id TEXT PRIMARY KEY REFERENCES cases(id),payload TEXT NOT NULL,
               delivered_at TEXT,attempts INTEGER NOT NULL DEFAULT 0,last_error_type TEXT);
         """)
+        columns = {row["name"] for row in self.db.execute("PRAGMA table_info(cases)")}
+        if "coverage_snapshot" not in columns:
+            self.db.execute("ALTER TABLE cases ADD COLUMN coverage_snapshot TEXT NOT NULL DEFAULT 'null'")
+
+    def set_coverage(self, value):
+        item = validate_coverage(value)
+        with self.lock, self.db:
+            return self._put_coverage(item)
+
+    def _put_coverage(self, item):
+        prior = self._coverage(item["customer_id"], item["endpoint_id"])
+        if prior == item:
+            return False
+        self.db.execute("""INSERT INTO source_coverage VALUES(?,?,?,?,?)
+            ON CONFLICT(customer_id,endpoint_id) DO UPDATE SET source=excluded.source,
+            complete_from=excluded.complete_from,complete_through=excluded.complete_through""",
+            tuple(item.values()))
+        return True
+
+    def _coverage(self, customer_id, endpoint_id):
+        row = self.db.execute("SELECT * FROM source_coverage WHERE customer_id=? AND endpoint_id=?",
+                              (customer_id, endpoint_id)).fetchone()
+        return dict(row) if row else None
+
+    def _evidence_hash(self, attempts, coverage):
+        return digest({"attempts": attempts, "source_coverage": coverage})
 
     def _attempts(self, customer_id, event_id, endpoint_id):
         rows = self.db.execute("""SELECT attempt_id,customer_id,event_id,endpoint_id,sequence,
@@ -195,9 +261,10 @@ class CaseStore:
             self.db.execute("INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?,?,?)", (*attempt.values(), stamp))
             return True
 
-    def import_attempts(self, values):
+    def import_attempts(self, values, coverage=None):
         """All-or-nothing batch ingestion for a sanitized support export."""
         normalized = [validate_attempt(value) for value in values]
+        windows = [validate_coverage(value) for value in coverage] if coverage is not None else None
         stats = {"inserted": 0, "duplicates": 0}
         with self.lock, self.db:
             for item in normalized:
@@ -210,6 +277,8 @@ class CaseStore:
                     continue
                 self.db.execute("INSERT INTO attempts VALUES(?,?,?,?,?,?,?,?,?,?)", (*item.values(), stamp))
                 stats["inserted"] += 1
+            if windows is not None:
+                stats["coverage_updated"] = sum(self._put_coverage(item) for item in windows)
         return stats
 
     def _audit(self, case_id, action, actor, detail):
@@ -226,16 +295,22 @@ class CaseStore:
                     raise Conflict("ticket ID reused with different data")
                 return {"case_id": prior["id"], "created": False}
             attempts = self._attempts(ticket["customer_id"], ticket["event_id"], ticket["endpoint_id"])
+            coverage = self._coverage(ticket["customer_id"], ticket["endpoint_id"])
             finding = finding_for(attempts, self.clock())
             evidence = evidence_for(policy, finding, attempts)
-            draft = validate_draft(generator(ticket, finding, evidence) if generator else
-                                   baseline_draft(ticket, finding, evidence), finding, evidence)
+            safe_generator = generator if coverage_state(finding, attempts, coverage) not in {"BEHIND_RETRY", "WINDOW_GAP", "NOT_REPORTED"} else None
+            draft = validate_draft(safe_generator(ticket, finding, evidence) if safe_generator else
+                                   baseline_draft(ticket, finding, evidence, coverage), finding, evidence)
             case_id = str(uuid.uuid4())
-            self.db.execute("""INSERT INTO cases VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)""",
+            self.db.execute("""INSERT INTO cases(
+                id,ticket_id,customer_id,event_id,endpoint_id,subject,description,ticket_hash,
+                status,finding,evidence,evidence_hash,draft,policy_version,created_at,reviewed_at,reviewer)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)""",
                             (case_id, ticket["ticket_id"], ticket["customer_id"], ticket["event_id"],
                              ticket["endpoint_id"], ticket["subject"], ticket["description"], digest(ticket),
-                             "pending_review", finding, json.dumps(evidence), digest(attempts), json.dumps(draft),
+                             "pending_review", finding, json.dumps(evidence), self._evidence_hash(attempts, coverage), json.dumps(draft),
                              policy["version"], utcnow()))
+            self.db.execute("UPDATE cases SET coverage_snapshot=? WHERE id=?", (json.dumps(coverage), case_id))
             self._audit(case_id, "opened", "system", {"finding": finding, "evidence_ids": draft["citations"]})
             return {"case_id": case_id, "created": True}
 
@@ -247,7 +322,12 @@ class CaseStore:
             result = dict(row)
             for field in ("evidence", "draft"):
                 result[field] = json.loads(result[field])
-            result["evidence_current"] = digest(self._attempts(row["customer_id"], row["event_id"], row["endpoint_id"])) == row["evidence_hash"]
+            result["source_coverage"] = json.loads(row["coverage_snapshot"])
+            attempts = self._attempts(row["customer_id"], row["event_id"], row["endpoint_id"])
+            current_coverage = self._coverage(row["customer_id"], row["endpoint_id"])
+            result["evidence_current"] = self._evidence_hash(attempts, current_coverage) == row["evidence_hash"]
+            pinned_attempts = [e["data"] for e in result["evidence"] if e["type"] == "delivery_attempt"]
+            result["coverage_state"] = coverage_state(row["finding"], pinned_attempts, result["source_coverage"])
             result["audit"] = [dict(r) for r in self.db.execute(
                 "SELECT action,actor,detail,created_at FROM audit WHERE case_id=? ORDER BY id", (case_id,))]
             return result
@@ -266,12 +346,14 @@ class CaseStore:
                 raise Conflict("only pending cases may refresh")
             ticket = {k: row[k] for k in ("ticket_id", "customer_id", "event_id", "endpoint_id", "subject", "description")}
             attempts = self._attempts(customer_id, row["event_id"], row["endpoint_id"])
+            coverage = self._coverage(customer_id, row["endpoint_id"])
             finding = finding_for(attempts, self.clock())
             evidence = evidence_for(policy, finding, attempts)
-            draft = validate_draft(generator(ticket, finding, evidence) if generator else
-                                   baseline_draft(ticket, finding, evidence), finding, evidence)
-            self.db.execute("UPDATE cases SET finding=?,evidence=?,evidence_hash=?,draft=?,policy_version=? WHERE id=?",
-                            (finding, json.dumps(evidence), digest(attempts), json.dumps(draft), policy["version"], case_id))
+            safe_generator = generator if coverage_state(finding, attempts, coverage) not in {"BEHIND_RETRY", "WINDOW_GAP", "NOT_REPORTED"} else None
+            draft = validate_draft(safe_generator(ticket, finding, evidence) if safe_generator else
+                                   baseline_draft(ticket, finding, evidence, coverage), finding, evidence)
+            self.db.execute("UPDATE cases SET finding=?,evidence=?,evidence_hash=?,draft=?,policy_version=?,coverage_snapshot=? WHERE id=?",
+                            (finding, json.dumps(evidence), self._evidence_hash(attempts, coverage), json.dumps(draft), policy["version"], json.dumps(coverage), case_id))
             self._audit(case_id, "refreshed", "system", {"finding": finding, "evidence_ids": draft["citations"]})
         return self.get(case_id, customer_id)
 
@@ -285,7 +367,7 @@ class CaseStore:
             if row["status"] != "pending_review":
                 raise Conflict("case is no longer pending")
             latest = self._attempts(customer_id, row["event_id"], row["endpoint_id"])
-            if digest(latest) != row["evidence_hash"]:
+            if self._evidence_hash(latest, self._coverage(customer_id, row["endpoint_id"])) != row["evidence_hash"]:
                 raise Conflict("delivery evidence changed; refresh the draft before review")
             draft = json.loads(row["draft"])
             if final_message is not None:
