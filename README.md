@@ -2,6 +2,8 @@
 
 **An evidence-bound support workbench for webhook delivery escalations.**
 
+**[Open the live interactive demo](https://casework-demo.netlify.app/)** · [Browser app and local setup](web/README.md)
+
 > “Your billing webhook didn't arrive. Was the event sent? We saw two notifications; did you charge us twice?”
 
 A support engineer cannot safely answer that from a ticket alone. They need the customer's event and endpoint IDs, delivery attempts, HTTP acknowledgments, retry schedule, and the platform's runbook. Casework assembles that evidence, drafts a cautious reply, requires human review, and stages an idempotent handoff to a support desk.
@@ -11,6 +13,8 @@ This is an original, runnable **reference deployment using synthetic incidents**
 ## Interactive browser demo
 
 The hosted workbench is a React + TypeScript app in [`web/`](web/) with source-owned shadcn/ui-style components. It lets a visitor inspect three synthetic escalations, add delivery attempts, invalidate stale evidence, refresh findings, edit and review a draft, and hand an approved response to an isolated demo desk. Changes are saved in the visitor's browser storage and can be reset. The hosted UI has **no shared backend, customer telemetry, external desk, or live AI model**. The Python service below is the separate runnable reference backend.
+
+**Try the [live demo](https://casework-demo.netlify.app/):** open T-1042, add the sample HTTP 200, observe the stale evidence warning, refresh the snapshot, acknowledge the remaining uncertainty, approve the revised response, then send it to the demo support desk. The Reset demo control returns the browser to the original synthetic cases.
 
 ```bash
 cd web
