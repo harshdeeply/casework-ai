@@ -18,6 +18,8 @@ The demo has no authentication and stores all changes in each browser's `localSt
 
 The operator profile is fictional. The logout button only explains that there is no account session. The monochrome UI does not imply production identity or integration.
 
+The **How it works** page explains the split between this browser simulation and the optional model adapter in the local Python reference service. In that service, code correlates attempts and source coverage, selects a finding and evidence, then either builds an offline template or asks a model to draft wording. The adapter sends ticket and event IDs, the fixed finding, and selected evidence, excluding the free-text ticket description. The backend checks the structured shape, finding, and citation IDs; a human still reviews factual wording. Incomplete source coverage for an overdue retry bypasses the model and uses a cautious template. This is not a live AI feature on Netlify and has not been evaluated on real customer tickets.
+
 The shadcn CLI registry could not be reached in the initial development environment; the Button, Badge, Card, Input, and Textarea source components and `components.json` were created directly following its source-owned component pattern.
 
 ## Hosting
