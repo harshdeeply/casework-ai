@@ -1,0 +1,6 @@
+[
+  {"id":"P-101","title":"Maintenance response","text":"Log the issue with its timestamp, property, and photos. A staff member reviews urgent requests before contacting a vendor."},
+  {"id":"P-102","title":"Rent payment records","text":"Record the due date, amount due, amount received, and payment date. Flag any mismatch for a human to review."},
+  {"id":"P-103","title":"Tenant screening privacy","text":"Request consent before screening. Keep screening reports restricted to authorized staff and do not include report details in outbound messages."},
+  {"id":"P-104","title":"Lease documents","text":"Store a versioned copy of a signed lease and record the parties and signature date. Refer contract interpretation questions to a qualified reviewer."}
+]
