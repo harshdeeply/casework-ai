@@ -1,0 +1,7 @@
+[
+  {"question":"How do we record rent payment amounts and dates?","expected":"P-102"},
+  {"question":"Do we need consent for tenant screening?","expected":"P-103"},
+  {"question":"What do I log for a maintenance issue?","expected":"P-101"},
+  {"question":"How do I store signed lease documents?","expected":"P-104"},
+  {"question":"What is the weather on Mars?","expected":null}
+]
